@@ -495,9 +495,9 @@
   const selected = "{{ selected_date }}";
 
   function shiftDate(delta) {
-    const d = new Date(selected + "T00:00:00");
-    d.setDate(d.getDate() + delta);
-    const iso = d.toISOString().slice(0, 10);
+    const [y, m, d] = selected.split('-').map(Number);
+    const date = new Date(y, m - 1, d + delta);
+    const iso = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
     if (iso > today) return;
     location.href = "/?d=" + iso;
   }
