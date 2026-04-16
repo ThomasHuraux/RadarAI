@@ -1,0 +1,39 @@
+name: Daily AI Radar
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC every day
+  workflow_dispatch:        # manual trigger
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Restore DB cache
+        uses: actions/cache@v4
+        with:
+          path: data/radar.db
+          key: radar-db-${{ runner.os }}
+          restore-keys: radar-db-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download NLTK data
+        run: python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab'); nltk.download('stopwords')"
+
+      - name: Run full pipeline
+        run: python main.py run
+
+      - name: Save DB
+        uses: actions/cache/save@v4
+        with:
+          path: data/radar.db
+          key: radar-db-${{ runner.os }}-${{ github.run_id }}
