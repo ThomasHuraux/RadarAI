@@ -377,8 +377,8 @@
     <div class="masthead-top">
       <div class="logo">AI <em>Radar</em></div>
       <div class="masthead-meta">
-        Intelligence artificielle<br>
-        Veille quotidienne
+        Artificial Intelligence<br>
+        Daily Briefing
       </div>
     </div>
     <div class="date-nav">
@@ -393,7 +393,7 @@
       <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">
         <span class="icon">&#8635;</span>
         <span class="spin">&#8987;</span>
-        Actualiser
+        Refresh
       </button>
       {% endif %}
     </div>
@@ -404,7 +404,7 @@
   <div class="stats-bar">
     <div class="stat"><strong>{{ digest.total_articles }}</strong> articles</div>
     <div class="stat"><strong>{{ digest.total_clusters }}</strong> clusters</div>
-    <div class="stat"><strong>{{ digest.topics | length }}</strong> hot topics</div>
+    <div class="stat"><strong>{{ digest.topics | length }}</strong> trending topics</div>
     <div class="stat" style="margin-left:auto;font-style:italic;text-transform:none;letter-spacing:0;font-size:.8rem;color:var(--muted)">{{ digest.date }}</div>
   </div>
 
@@ -417,7 +417,7 @@
   {% endif %}
 
   {% if digest.topics %}
-    <div class="section-label">Tendances du jour</div>
+    <div class="section-label">Today's Trends</div>
     {% for topic in digest.topics %}
     <div class="topic-card">
       <div class="topic-rank {% if topic.rank <= 3 %}hot{% endif %}">{{ topic.rank }}</div>
@@ -427,7 +427,7 @@
           <div class="badges">
             <span class="badge badge-count">{{ topic.count }} articles</span>
             {% if topic.is_new %}
-              <span class="badge badge-growth-new">nouveau</span>
+              <span class="badge badge-growth-new">new</span>
             {% else %}
               <span class="badge badge-growth-up">{{ topic.growth }}</span>
             {% endif %}
@@ -448,7 +448,7 @@
         {% endif %}
 
         {% if topic.top_titles %}
-        <div class="sources-label">Sources</div>
+        <div class="sources-label">Key Sources</div>
         {% for src in topic.top_titles %}
         <div class="source-row">
           {% if src.source == "arxiv" %}<span class="source-badge sb-arxiv">arXiv</span>
@@ -470,23 +470,23 @@
     {% endfor %}
   {% else %}
     <div class="empty">
-      <h2>Aucune donnée pour {{ digest.date }}</h2>
+      <h2>No data for {{ digest.date }}</h2>
       {% if selected_date == today %}
       <p style="margin-top:1rem">
         <button class="refresh-btn" style="margin:0 auto" onclick="doRefresh()">
           <span class="icon">&#8635;</span>
           <span class="spin">&#8987;</span>
-          Lancer la collecte
+          Run Collection
         </button>
       </p>
       {% else %}
-      <p style="margin-top:.75rem;font-size:.85rem">Pas de données pour cette date.</p>
+      <p style="margin-top:.75rem;font-size:.85rem">No data for this date.</p>
       {% endif %}
     </div>
   {% endif %}
 
   <footer>
-    AI Radar &mdash; open source &mdash; 0&thinsp;€
+    AI Radar &mdash; open source &mdash; free
   </footer>
 </div>
 
@@ -519,28 +519,28 @@
     const remaining = cooldownRemaining();
     if (remaining > 0) {
       const mins = Math.ceil(remaining / 60000);
-      showToast(`Déjà rafraîchi — attendre encore ${mins} min`);
+      showToast(`Already refreshed — wait ${mins} more min`);
       return;
     }
     const btns = document.querySelectorAll('.refresh-btn');
     btns.forEach(b => { b.disabled = true; b.classList.add('loading'); });
     const bar = document.getElementById('ptr-indicator');
     bar.classList.add('active');
-    showToast('Collecte en cours...', 60000);
+    showToast('Collecting...', 60000);
     try {
       const res = await fetch('/api/refresh', { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
         setLastRefresh();
-        showToast(`OK — ${data.articles_saved} nouveaux articles, ${data.clusters} clusters`);
+        showToast(`Done — ${data.articles_saved} new articles, ${data.clusters} clusters`);
         setTimeout(() => location.reload(), 1200);
       } else {
-        showToast('Erreur : ' + (data.error || 'inconnue'));
+        showToast('Error: ' + (data.error || 'unknown'));
         btns.forEach(b => { b.disabled = false; b.classList.remove('loading'); });
         bar.classList.remove('active');
       }
     } catch (e) {
-      showToast('Erreur réseau');
+      showToast('Network error');
       btns.forEach(b => { b.disabled = false; b.classList.remove('loading'); });
       bar.classList.remove('active');
     }

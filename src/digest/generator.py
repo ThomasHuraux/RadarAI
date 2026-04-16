@@ -137,7 +137,7 @@ def generate_digest_html(clusters: list[dict], target_date: str, top_n: int = 5)
             growth_str = f"+{growth_pct}%" if growth_pct >= 0 else f"{growth_pct}%"
             is_new = False
         else:
-            growth_str = "nouveau"
+            growth_str = "new"
             is_new = True
 
         all_text = " ".join(
