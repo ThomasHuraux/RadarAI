@@ -32,6 +32,8 @@ def init_db():
         cols = {r[1] for r in conn.execute("PRAGMA table_info(clusters)").fetchall()}
         if cols and "name" not in cols:
             conn.execute("ALTER TABLE clusters ADD COLUMN name TEXT")
+        if cols and "yesterday_count" not in cols:
+            conn.execute("ALTER TABLE clusters ADD COLUMN yesterday_count INTEGER DEFAULT 0")
 
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS articles (
@@ -53,6 +55,7 @@ def init_db():
                 keywords TEXT NOT NULL,       -- JSON : liste de mots-clés TF-IDF
                 trend_score REAL DEFAULT 0,
                 article_count INTEGER DEFAULT 0,
+                yesterday_count INTEGER DEFAULT 0,
                 summary TEXT,
                 top_titles TEXT,              -- JSON : liste de {title, url, source}
                 PRIMARY KEY (id, date)        -- un cluster peut exister sur plusieurs jours
@@ -113,8 +116,8 @@ def save_clusters(clusters: list[dict], target_date: str):
         for c in clusters:
             conn.execute("""
                 INSERT INTO clusters
-                    (id, date, name, keywords, trend_score, article_count, summary, top_titles)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, date, name, keywords, trend_score, article_count, yesterday_count, summary, top_titles)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 c["id"],
                 target_date,
@@ -122,6 +125,7 @@ def save_clusters(clusters: list[dict], target_date: str):
                 json.dumps(c["keywords"]),
                 c.get("trend_score", 0),
                 c.get("article_count", 0),
+                c.get("yesterday_count", 0),
                 c.get("summary", ""),
                 json.dumps(c.get("top_titles", [])),
             ))

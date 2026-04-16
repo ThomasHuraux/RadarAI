@@ -41,7 +41,7 @@ def index(request: Request, d: str = None):
                 if a["cluster_id"] == c["id"]
             ]
             c["articles"] = articles
-            c["yesterday_count"] = 0
+            c.setdefault("yesterday_count", 0)
             full_clusters.append(c)
 
         digest = generate_digest_html(full_clusters, target_date)
