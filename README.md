@@ -4,7 +4,7 @@ Veille IA quotidienne — 100% open source, 0€, sans LLM payant.
 
 Collecte les articles et papers du jour (RSS, arXiv, Semantic Scholar), les regroupe par sujet, détecte les tendances, et génère un digest consultable via une interface web.
 
-<img width="1013" height="605" alt="Capture d’écran 2026-04-16 à 23 33 43" src="https://github.com/user-attachments/assets/2dd4e80b-3e75-4eb3-a2ac-6642bfa138c4" />
+<img width="1013" height="612" alt="Capture d’écran 2026-04-17 à 00 01 07" src="https://github.com/user-attachments/assets/3d71d28e-9df3-431c-826f-21e866784f01" />
 
 
 ---
