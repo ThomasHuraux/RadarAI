@@ -95,7 +95,7 @@ RadarAI/
 ├── main.py                        # CLI entry point
 ├── requirements.txt
 ├── templates/
-│   └── index.html                 # Dark UI theme
+│   └── index.html                 # UI theme
 ├── src/
 │   ├── collector/
 │   │   ├── rss_collector.py       # RSS feeds (media + Reddit + HN)
