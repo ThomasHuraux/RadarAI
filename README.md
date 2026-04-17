@@ -4,8 +4,7 @@ Daily AI news — 100% open source, free, no paid LLMs.
 
 Collects today’s articles and papers (RSS, arXiv, Semantic Scholar), groups them by topic, identifies trends, and generates a digest accessible via a web interface.
 
-<img width="1013" height="612" alt="Screenshot 2026-04-17 at 00:01:07" src="https://github.com/user-attachments/assets/3d71d28e-9df3-431c -826f-21e866784f01" />
-
+<img width="1013" height="612" alt="Capture d’écran 2026-04-17 à 00 01 07" src="https://github.com/user-attachments/assets/4fe363bf-3474-48c9-85c5-79d48d6e9189" />
 
 ---
 
