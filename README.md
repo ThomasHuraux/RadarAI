@@ -38,6 +38,90 @@ collect → analyze → serve
 - **Clustering**: HDBSCAN (density-based, no fixed k) with K-Means fallback if too much noise
 - **Keywords**: TF-IDF ngrams (1-3) with AI-domain stopwords
 - **Titles**: article closest to the cluster centroid (no LLM)
-- **Abstracts**: e
 
-Translated with DeepL.com (free version)
+- **Summaries**: TextRank extraction via `sumy`
+- **Persistence**: SQLite (WAL mode), complete history by date
+- **Backend**: FastAPI + Jinja2
+- **UI**: dark theme, responsive, pull-to-refresh (mobile + trackpad)
+
+---
+
+## Installation
+
+```bash
+git clone https://github.com/ThomasHuraux/RadarAI.git
+cd RadarAI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c “import nltk; nltk.download(‘punkt’); nltk.download(‘punkt_tab’); nltk.download(‘stopwords’)”
+```
+
+---
+
+## Usage
+
+```bash
+# Full pipeline (collect + analyze + digest in terminal)
+python main.py run
+
+# Separate steps
+python main.py collect
+python main.py analyze
+python main.py digest
+
+# Web interface at http://localhost:8000
+python main.py serve
+
+# Target a specific date
+python main.py collect --date 2026-04-15
+python main.py analyze --date 2026-04-15
+```
+
+---
+
+## Automation (GitHub Actions)
+
+The `.github/workflows/daily_radar.yml` workflow runs the pipeline every day at 06:00 UTC. The SQLite database is persisted via the GitHub Actions cache between runs.
+
+To enable it: push the repo to GitHub and enable Actions.
+
+---
+
+## Structure
+
+```
+RadarAI/
+├── main.py                        # CLI entry point
+├── requirements.txt
+├── templates/
+│   └── index.html                 # Dark UI theme
+├── src/
+│   ├── collector/
+│   │   ├── rss_collector.py       # RSS feeds (media + Reddit + HN)
+│   │   ├── arxiv_collector.py     # arXiv API
+│   │   └── semanticscholar_collector.py
+│   ├── processor/
+│   │   ├── cleaner.py             # HTML cleaning, Reddit noise filters
+│   │   └── deduplicator.py        # TF-IDF cosine similarity deduplication
+│   ├── nlp/
+│   │   ├── embedder.py            # TF-IDF+SVD or sentence-transformers
+│   │   ├── clusterer.py           # HDBSCAN + KMeans fallback
+│   │   └── keywords.py            # TF-IDF n-gram keyword extraction
+│   ├── trends/
+│   │   └── detector.py            # Trend score, cluster centroids
+│   ├── digest/
+│   │   └── generator.py           # Text digest + JSON for the web
+│   ├── storage/
+│   │   └── db.py                  # SQLite (articles + clusters)
+│   └── api/
+│       └── app.py                 # FastAPI (UI + /api/refresh)
+└── .github/workflows/
+    └── daily_radar.yml
+```
+
+---
+
+## License
+
+MIT
