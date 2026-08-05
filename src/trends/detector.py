@@ -4,7 +4,6 @@ from datetime import date, timedelta
 from collections import defaultdict
 from src.storage import db
 from src.nlp.keywords import extract_keywords, get_cluster_name
-from src.nlp.clusterer import MIN_CLUSTER_FIT
 from src.nlp import llm_namer, ollama_client
 
 
@@ -120,7 +119,11 @@ def compute_trend_score(count_today: int, count_yesterday: int) -> float:
     return round(count_today * 0.6 + growth_rate * 0.4, 4)
 
 
-def build_clusters(articles: list[dict], target_date: str) -> list[dict]:
+def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: float | None = None) -> list[dict]:
+    if cohesion_threshold is None:
+        from src.nlp.clusterer import MIN_CLUSTER_FIT
+        cohesion_threshold = MIN_CLUSTER_FIT
+
     yesterday = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
     yesterday_clusters = db.get_clusters_by_date(yesterday)
 
@@ -207,7 +210,7 @@ def build_clusters(articles: list[dict], target_date: str) -> list[dict]:
             "cohesion": cohesion,
             "sources": sources,
             "source_count": len(sources),
-            "low_confidence": cohesion < MIN_CLUSTER_FIT,
+            "low_confidence": cohesion < cohesion_threshold,
             "labeling_method": cluster_labeling_method[cid],
         })
 

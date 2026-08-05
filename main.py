@@ -103,13 +103,13 @@ def cmd_analyze(target_date: str):
     embeddings = get_embeddings_matrix(all_articles)
 
     print(f"[analyze] Clustering {len(all_articles)} articles...")
-    all_articles = cluster_articles(all_articles, embeddings)
+    all_articles, cohesion_threshold = cluster_articles(all_articles, embeddings)
 
     for a in all_articles:
         db.update_article_cluster(a["id"], a["cluster_id"], a.get("cluster_fit"))
 
     print("[analyze] Building trend scores...")
-    clusters = build_clusters(all_articles, target_date)
+    clusters = build_clusters(all_articles, target_date, cohesion_threshold)
     print(f"[analyze] {len(clusters)} clusters found")
 
     db.save_clusters(clusters, target_date)

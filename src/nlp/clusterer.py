@@ -9,42 +9,78 @@ except ImportError:
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-# Similarité cosinus minimale d'un article à son centroïde de cluster pour y rester.
-# En dessous, l'article est rétrogradé en bruit (-1) plutôt que forcé dans un groupe
-# auquel il ne ressemble pas — c'est le garde-fou qui manquait à KMeans (qui autrement
-# assigne TOUJOURS chaque article à son centroïde le plus proche, aussi mauvais soit-il).
-#
-# Calibré sur des embeddings nomic-embed-text (via Ollama) réels, sur deux journées
-# de production (cf. `main.py inspect` sur 2026-07-15/16) : les similarités cosinus de
-# ce modèle vivent dans une bande beaucoup plus resserrée et plus haute que l'ancien
-# espace TF-IDF+SVD (0.15-0.42) — même un cluster hétéroclite mélangeant des sujets
-# sans rapport n'était jamais descendu sous ~0.69 de similarité à son propre centroïde.
-# La séparation coherent/incohérent ne se fait donc plus via ce seuil seul : c'est
-# `cluster_selection_method="leaf"` ci-dessous qui empêche HDBSCAN de fusionner des
-# sous-sujets distincts en un seul gros cluster ; ce seuil de 0.55 reste un filet de
-# sécurité sous le plancher observé des clusters sains (~0.74-0.88), pas le mécanisme
-# principal de séparation. À recalibrer si le backend d'embeddings change à nouveau.
+# Plancher/plafond de sécurité pour le seuil de cohésion dynamique ci-dessous : quel
+# que soit le backend d'embeddings, on ne laisse jamais le seuil dériver hors de cette
+# bande (sinon un jour dégénéré pourrait soit tout gater en bruit, soit ne rien gater).
+_DYNAMIC_FIT_FLOOR = 0.35
+_DYNAMIC_FIT_CEILING = 0.75
+
+# Valeur de repli utilisée quand le corpus du jour est trop petit pour estimer une
+# distribution fiable (cf. _dynamic_cohesion_threshold). Calibrée à l'origine sur des
+# embeddings nomic-embed-text réels (deux journées de production, `main.py inspect`
+# sur 2026-07-15/16) : un plancher sous le bas des clusters sains observés (~0.74-0.88).
 MIN_CLUSTER_FIT = 0.55
 
 # Taille minimale d'un cluster après rétrogradation des membres mal ajustés — un
 # "sujet" porté par un seul article restant n'en est plus un.
 MIN_CLUSTER_SIZE_AFTER_GATING = 2
 
+# En dessous de ce nombre de similarités observées, la distribution du jour est trop
+# petite pour être un signal fiable — on retombe sur le plancher statique MIN_CLUSTER_FIT.
+_MIN_SAMPLES_FOR_DYNAMIC_THRESHOLD = 20
 
-def _gate_by_cohesion(embs: np.ndarray, labels: np.ndarray) -> np.ndarray:
+
+def _dynamic_cohesion_threshold(embs: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Calcule le seuil de cohésion du jour à partir de la distribution réelle des
+    similarités membre→centroïde, au lieu d'une constante figée une fois pour toutes.
+
+    MIN_CLUSTER_FIT=0.55 avait été calibré à la main sur deux journées de production
+    avec un backend d'embeddings donné (cf. commentaire ci-dessus) — tout changement de
+    backend (modèle Ollama différent, autre fournisseur d'embeddings) exigeait de le
+    recalibrer manuellement. Ici, on prend le 10e percentile des similarités
+    membre→centroïde observées CE jour-là : ça rejette systématiquement la queue la
+    moins cohérente de chaque cluster, quelle que soit la bande de valeurs (resserrée et
+    haute pour nomic-embed-text, plus large pour un autre modèle), sans intervention
+    manuelle. Bridé entre _DYNAMIC_FIT_FLOOR et _DYNAMIC_FIT_CEILING pour éviter qu'un
+    jour dégénéré (ex: corpus quasi identique, ou au contraire très dispersé) ne
+    désactive le gating ou ne gate tout en bruit.
+    """
+    unique_labels = {l for l in labels.tolist() if l != -1}
+    sims: list[float] = []
+    for label in unique_labels:
+        idx = np.where(labels == label)[0]
+        if len(idx) < 2:
+            continue
+        centroid = normalize(embs[idx].mean(axis=0, keepdims=True))[0]
+        sims.extend((embs[idx] @ centroid).tolist())
+
+    if len(sims) < _MIN_SAMPLES_FOR_DYNAMIC_THRESHOLD:
+        return MIN_CLUSTER_FIT
+
+    threshold = float(np.percentile(sims, 10))
+    return min(_DYNAMIC_FIT_CEILING, max(_DYNAMIC_FIT_FLOOR, threshold))
+
+
+def _gate_by_cohesion(embs: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, float]:
     """
     Rétrograde en bruit (-1) tout article trop éloigné du centroïde de son cluster,
     puis dissout les clusters devenus trop petits une fois ces membres retirés.
+
+    Retourne aussi le seuil effectivement utilisé, pour que les appelants (ex: le
+    calcul de `low_confidence` par cluster) restent cohérents avec ce qui a réellement
+    filtré les articles ce jour-là plutôt que de comparer à une constante différente.
     """
     labels = labels.copy()
     unique_labels = {l for l in labels.tolist() if l != -1}
+    threshold = _dynamic_cohesion_threshold(embs, labels)
 
     for label in unique_labels:
         idx = np.where(labels == label)[0]
         centroid = normalize(embs[idx].mean(axis=0, keepdims=True))[0]
         sims = embs[idx] @ centroid
         for i, sim in zip(idx, sims):
-            if sim < MIN_CLUSTER_FIT:
+            if sim < threshold:
                 labels[i] = -1
 
     for label in unique_labels:
@@ -52,7 +88,7 @@ def _gate_by_cohesion(embs: np.ndarray, labels: np.ndarray) -> np.ndarray:
         if 0 < len(idx) < MIN_CLUSTER_SIZE_AFTER_GATING:
             labels[idx] = -1
 
-    return labels
+    return labels, threshold
 
 
 def _attach_cluster_fit(articles: list[dict], embs: np.ndarray, labels: np.ndarray) -> None:
@@ -67,7 +103,7 @@ def _attach_cluster_fit(articles: list[dict], embs: np.ndarray, labels: np.ndarr
         article["cluster_fit"] = float(emb @ centroids[label]) if label in centroids else None
 
 
-def cluster_articles(articles: list[dict], embeddings: np.ndarray) -> list[dict]:
+def cluster_articles(articles: list[dict], embeddings: np.ndarray) -> tuple[list[dict], float]:
     """
     Groupe les articles par sujet via clustering dans l'espace d'embeddings.
 
@@ -97,7 +133,7 @@ def cluster_articles(articles: list[dict], embeddings: np.ndarray) -> list[dict]
         for a in articles:
             a["cluster_id"] = 0
             a["cluster_fit"] = None
-        return articles
+        return articles, MIN_CLUSTER_FIT
 
     # Renormaliser pour garantir des vecteurs unitaires
     # (HDBSCAN euclidean ≡ cosine similarity sur vecteurs normalisés)
@@ -148,10 +184,10 @@ def cluster_articles(articles: list[dict], embeddings: np.ndarray) -> list[dict]
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         labels = kmeans.fit_predict(embs)
 
-    labels = _gate_by_cohesion(embs, labels)
+    labels, threshold = _gate_by_cohesion(embs, labels)
     _attach_cluster_fit(articles, embs, labels)
 
     for article, label in zip(articles, labels):
         article["cluster_id"] = int(label)
 
-    return articles
+    return articles, threshold
