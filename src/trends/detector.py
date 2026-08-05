@@ -119,6 +119,23 @@ def compute_trend_score(count_today: int, count_yesterday: int) -> float:
     return round(count_today * 0.6 + growth_rate * 0.4, 4)
 
 
+# Sources purement académiques : arXiv/HuggingFace Papers/Semantic Scholar publient en
+# continu sur les mêmes grands thèmes de recherche ("agents LLM", "architectures de
+# modèles"...). Un cluster composé UNIQUEMENT de ces sources n'est donc pas un événement
+# d'actualité mais une catégorie de recherche permanente qui réapparaîtra jour après jour
+# avec un nom générique — constaté en pratique : "Large Language Model Agents",
+# "Large Language Model Architectures" restent en tête alors qu'ils ne rapportent aucun
+# fait nouveau, juste le volume habituel de publications sur le sujet. Dès qu'une source
+# presse/outils (RSS, GitHub releases, blogs officiels) corrobore le cluster, ce n'est
+# plus une simple catégorie de fond — le signal redevient pertinent.
+_ACADEMIC_ONLY_SOURCES = {"arxiv", "huggingface_papers", "semanticscholar"}
+ACADEMIC_ONLY_PENALTY = 0.4
+
+
+def _is_academic_only(sources: list[str]) -> bool:
+    return bool(sources) and all(s in _ACADEMIC_ONLY_SOURCES for s in sources)
+
+
 def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: float | None = None) -> list[dict]:
     if cohesion_threshold is None:
         from src.nlp.clusterer import MIN_CLUSTER_FIT
@@ -176,7 +193,6 @@ def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: f
 
         count_today = len(arts)
         count_yest = yesterday_counts.get(cid, 0)
-        score = compute_trend_score(count_today, count_yest)
 
         top_arts = sorted(arts, key=lambda x: len(x.get("content", "")), reverse=True)[:3]
         top_titles = [{"title": a["title"], "url": a.get("url", ""), "source": a.get("source", "")} for a in top_arts]
@@ -194,6 +210,11 @@ def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: f
             sources.update(duplicate_sources.get(a["id"], []))
         sources.discard("")
         sources = sorted(sources)
+
+        score = compute_trend_score(count_today, count_yest)
+        academic_only = _is_academic_only(sources)
+        if academic_only:
+            score = round(score * ACADEMIC_ONLY_PENALTY, 4)
 
         centroid = today_centroids.get(cid)
 
