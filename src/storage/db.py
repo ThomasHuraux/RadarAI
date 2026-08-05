@@ -94,6 +94,10 @@ def init_db():
             conn.execute("ALTER TABLE clusters ADD COLUMN labeling_method TEXT")
         if cols and "centroid" not in cols:
             conn.execute("ALTER TABLE clusters ADD COLUMN centroid TEXT")
+        if cols and "top_entity" not in cols:
+            conn.execute("ALTER TABLE clusters ADD COLUMN top_entity TEXT")
+        if cols and "entity_source_count" not in cols:
+            conn.execute("ALTER TABLE clusters ADD COLUMN entity_source_count INTEGER DEFAULT 0")
 
         article_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
         if article_cols and "cluster_fit" not in article_cols:
@@ -138,6 +142,8 @@ def init_db():
                 low_confidence INTEGER DEFAULT 0, -- 1 si cohesion < MIN_CLUSTER_FIT
                 labeling_method TEXT,         -- "llm" ou "heuristic-*" — traçabilité
                 centroid TEXT,                -- JSON : centroïde d'embedding du cluster (matching cross-jour)
+                top_entity TEXT,               -- entité IA connue (modèle/produit) la plus corroborée
+                entity_source_count INTEGER DEFAULT 0, -- nb de familles de sources citant top_entity
                 PRIMARY KEY (id, date)        -- un cluster peut exister sur plusieurs jours
             );
 
@@ -262,8 +268,8 @@ def save_clusters(clusters: list[dict], target_date: str):
                 INSERT INTO clusters
                     (id, date, name, keywords, trend_score, article_count, yesterday_count,
                      summary, top_titles, cohesion, source_count, sources, low_confidence,
-                     labeling_method, centroid)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     labeling_method, centroid, top_entity, entity_source_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 c["id"],
                 target_date,
@@ -280,6 +286,8 @@ def save_clusters(clusters: list[dict], target_date: str):
                 int(c.get("low_confidence", False)),
                 c.get("labeling_method"),
                 json.dumps(c["centroid"]) if c.get("centroid") is not None else None,
+                c.get("top_entity"),
+                c.get("entity_source_count", 0),
             ))
 
 

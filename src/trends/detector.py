@@ -5,6 +5,7 @@ from collections import defaultdict
 from src.storage import db
 from src.nlp.keywords import extract_keywords, get_cluster_name
 from src.nlp import llm_namer, ollama_client
+from src.nlp.entities import extract_entities
 
 
 def _cluster_centroid(arts: list[dict]) -> np.ndarray | None:
@@ -164,6 +165,46 @@ def compute_trend_score(count_today: int, count_yesterday: int, sources: list[st
     return round(score, 4)
 
 
+# Bonus au-delà de la diversité de familles au niveau du cluster (qui ne prouve que
+# "des sources différentes parlent de sujets proches") : quand plusieurs familles
+# indépendantes citent explicitement le MÊME nom de modèle/produit, c'est la preuve
+# directe qu'un objet précis fait l'actualité, pas juste une proximité thématique
+# détectée par le clustering. Poids plus fort que FAMILY_WEIGHT car c'est un signal
+# plus précis. Ne peut jamais se déclencher sur un cluster mono-famille : une entité
+# ne peut être corroborée par 2+ familles que si le cluster lui-même en contient au
+# moins 2 (cf. _top_corroborated_entity), donc pas de conflit avec SINGLE_FAMILY_PENALTY.
+ENTITY_WEIGHT = 8.0
+MIN_ENTITY_FAMILIES = 2
+
+
+def _top_corroborated_entity(arts: list[dict]) -> tuple[str | None, int]:
+    """
+    Cherche, parmi les entités IA connues (cf. src/nlp/entities.py) mentionnées dans le
+    cluster, celle citée par le plus grand nombre de familles de sources distinctes.
+    Renvoie (None, 0) si aucune entité n'est corroborée par au moins MIN_ENTITY_FAMILIES
+    familles différentes.
+    """
+    entity_families: dict[str, set[str]] = defaultdict(set)
+    entity_mentions: dict[str, int] = defaultdict(int)
+
+    for a in arts:
+        text = f"{a.get('title', '')} {a.get('content', '')}"
+        family = SOURCE_FAMILIES.get(a.get("source", ""), a.get("source", ""))
+        for entity in extract_entities(text):
+            entity_families[entity].add(family)
+            entity_mentions[entity] += 1
+
+    if not entity_families:
+        return None, 0
+
+    best_entity, best_families = max(
+        entity_families.items(), key=lambda kv: (len(kv[1]), entity_mentions[kv[0]])
+    )
+    if len(best_families) < MIN_ENTITY_FAMILIES:
+        return None, 0
+    return best_entity, len(best_families)
+
+
 def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: float | None = None) -> list[dict]:
     if cohesion_threshold is None:
         from src.nlp.clusterer import MIN_CLUSTER_FIT
@@ -241,6 +282,10 @@ def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: f
 
         score = compute_trend_score(count_today, count_yest, sources)
 
+        top_entity, entity_family_count = _top_corroborated_entity(arts)
+        if top_entity:
+            score = round(score + entity_family_count * ENTITY_WEIGHT, 4)
+
         centroid = today_centroids.get(cid)
 
         clusters.append({
@@ -251,6 +296,8 @@ def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: f
             "article_count": count_today,
             "yesterday_count": count_yest,
             "trend_score": score,
+            "top_entity": top_entity,
+            "entity_source_count": entity_family_count,
             "top_titles": top_titles,
             "articles": arts,
             "cohesion": cohesion,
