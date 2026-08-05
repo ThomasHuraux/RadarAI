@@ -104,36 +104,64 @@ def _match_yesterday_counts(
     return result
 
 
-def compute_trend_score(count_today: int, count_yesterday: int) -> float:
-    """
-    Score de tendance : combine volume absolu et croissance relative.
+# Familles de sources indépendantes. Le but du score de tendance n'est PAS de compter
+# des articles mais de détecter un sujet couvert par plusieurs voix INDÉPENDANTES —
+# "tout le monde en parle", pas "cette API a retourné 15 résultats sur ce thème".
+# `arxiv` + `huggingface_papers` ne comptent qu'une seule famille : HuggingFace Daily
+# Papers republie littéralement les mêmes papers arXiv (même contenu, pas une seconde
+# opinion). `semanticscholar` fait la même chose (agrégateur académique), d'où le
+# regroupement des trois dans "academic" plutôt que de les compter comme 3 sources
+# distinctes — c'était l'angle mort de l'ancien score (count*0.6 + growth*0.4), qui
+# faisait gagner un cluster de 13 papers académiques sur un cluster de 5 articles
+# provenant réellement de 2 mondes différents (presse + outils).
+SOURCE_FAMILIES = {
+    "arxiv": "academic",
+    "huggingface_papers": "academic",
+    "semanticscholar": "academic",
+    "techcrunch": "press",
+    "venturebeat": "press",
+    "mit_tech_review": "press",
+    "the_verge_ai": "press",
+    "wired_ai": "press",
+    "reddit_ml": "social",
+    "reddit_localllama": "social",
+    "reddit_artificial": "social",
+    "hackernews": "social",
+    "github_releases": "tooling",
+    "openai_blog": "official",
+    "anthropic_blog": "official",
+}
 
-    Formule : count * 0.6 + growth_rate * 0.4
 
-    - count * 0.6 : un sujet avec 50 articles est intrinsèquement plus important
-      qu'un sujet avec 3 articles, même si les deux ont doublé.
-    - growth_rate * 0.4 : un sujet qui explose aujourd'hui remonte dans le classement
-      même s'il était petit hier.
+def _source_family_count(sources: list[str]) -> int:
+    return len({SOURCE_FAMILIES.get(s, s) for s in sources})
+
+
+# Poids dominant : chaque famille indépendante supplémentaire vaut largement plus que
+# du volume brut, pour qu'un sujet couvert par 3 mondes différents (presse, réseaux,
+# officiel) batte toujours un cluster de 50 articles issus d'une seule famille.
+FAMILY_WEIGHT = 6.0
+VOLUME_WEIGHT = 0.3
+GROWTH_WEIGHT = 0.2
+
+# Un cluster confiné à une seule famille de sources n'est jamais un "sujet du jour"
+# corroboré — que ce soit 50 papers académiques ou 20 posts du même sub Reddit. Il
+# reste affichable (un papier vraiment isolé peut être important), mais fortement
+# relégué plutôt que de dominer le classement sur le seul volume.
+SINGLE_FAMILY_PENALTY = 0.25
+
+
+def compute_trend_score(count_today: int, count_yesterday: int, sources: list[str]) -> float:
     """
+    Score de tendance : la diversité de familles de sources INDÉPENDANTES domine ;
+    volume et croissance ne servent qu'à départager des sujets à diversité égale.
+    """
+    family_count = _source_family_count(sources)
     growth_rate = (count_today - count_yesterday) / max(1, count_yesterday)
-    return round(count_today * 0.6 + growth_rate * 0.4, 4)
-
-
-# Sources purement académiques : arXiv/HuggingFace Papers/Semantic Scholar publient en
-# continu sur les mêmes grands thèmes de recherche ("agents LLM", "architectures de
-# modèles"...). Un cluster composé UNIQUEMENT de ces sources n'est donc pas un événement
-# d'actualité mais une catégorie de recherche permanente qui réapparaîtra jour après jour
-# avec un nom générique — constaté en pratique : "Large Language Model Agents",
-# "Large Language Model Architectures" restent en tête alors qu'ils ne rapportent aucun
-# fait nouveau, juste le volume habituel de publications sur le sujet. Dès qu'une source
-# presse/outils (RSS, GitHub releases, blogs officiels) corrobore le cluster, ce n'est
-# plus une simple catégorie de fond — le signal redevient pertinent.
-_ACADEMIC_ONLY_SOURCES = {"arxiv", "huggingface_papers", "semanticscholar"}
-ACADEMIC_ONLY_PENALTY = 0.4
-
-
-def _is_academic_only(sources: list[str]) -> bool:
-    return bool(sources) and all(s in _ACADEMIC_ONLY_SOURCES for s in sources)
+    score = family_count * FAMILY_WEIGHT + count_today * VOLUME_WEIGHT + growth_rate * GROWTH_WEIGHT
+    if family_count <= 1:
+        score *= SINGLE_FAMILY_PENALTY
+    return round(score, 4)
 
 
 def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: float | None = None) -> list[dict]:
@@ -211,10 +239,7 @@ def build_clusters(articles: list[dict], target_date: str, cohesion_threshold: f
         sources.discard("")
         sources = sorted(sources)
 
-        score = compute_trend_score(count_today, count_yest)
-        academic_only = _is_academic_only(sources)
-        if academic_only:
-            score = round(score * ACADEMIC_ONLY_PENALTY, 4)
+        score = compute_trend_score(count_today, count_yest, sources)
 
         centroid = today_centroids.get(cid)
 
