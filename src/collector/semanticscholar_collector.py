@@ -98,6 +98,10 @@ def collect_semanticscholar(max_per_query: int = 15) -> list[dict]:
                 "content": abstract,
                 "url": _paper_url(paper),
                 "date": today,
+                # `pub_date` est la vraie date de publication calculée juste au-dessus
+                # (déjà utilisée pour le filtre >=2025) — on la conserve ici au lieu
+                # de la jeter, `date` restant "aujourd'hui" pour l'affichage.
+                "published_date": pub_date,
                 "embedding": None,
                 "cluster_id": -1,
             })

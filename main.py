@@ -116,7 +116,7 @@ def cmd_analyze(target_date: str):
     all_articles, cohesion_threshold = cluster_articles(all_articles, embeddings)
 
     for a in all_articles:
-        db.update_article_cluster(a["id"], a["cluster_id"], a.get("cluster_fit"))
+        db.update_article_cluster(a["id"], a["date"], a["cluster_id"], a.get("cluster_fit"))
 
     print("[analyze] Building trend scores...")
     clusters = build_clusters(all_articles, target_date, cohesion_threshold)

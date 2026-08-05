@@ -55,6 +55,7 @@ def collect_arxiv(max_results: int = 50) -> list[dict]:
         title_el = entry.find("atom:title", NS)
         summary_el = entry.find("atom:summary", NS)
         id_el = entry.find("atom:id", NS)
+        published_el = entry.find("atom:published", NS)
         # On cherche le lien "alternate" = page HTML du paper (pas le PDF)
         link_el = entry.find("atom:link[@rel='alternate']", NS)
 
@@ -63,12 +64,19 @@ def collect_arxiv(max_results: int = 50) -> list[dict]:
         arxiv_id = (id_el.text or "").strip()
         link = (link_el.attrib.get("href", "") if link_el is not None else arxiv_id)
 
-        # On utilise la date d'aujourd'hui (UTC) plutôt que la date de soumission
-        # arXiv réelle (<published>) : le cycle d'annonce d'arXiv a environ un jour
-        # de décalage, donc utiliser la date de soumission ferait apparaître la
-        # plupart des papers datés d'hier (ou avant), et ils disparaîtraient
-        # de la vue "aujourd'hui".
-        published = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # `date` (vue/regroupement) reste "aujourd'hui" (UTC) plutôt que la date de
+        # soumission arXiv réelle (<published>) : le cycle d'annonce d'arXiv a environ
+        # un jour de décalage, donc utiliser la date de soumission ferait apparaître
+        # la plupart des papers datés d'hier (ou avant), et ils disparaîtraient de la
+        # vue "aujourd'hui". La vraie date est conservée séparément dans
+        # `published_date`, pour ne pas perdre l'information.
+        view_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        published_date = view_date
+        if published_el is not None and published_el.text:
+            try:
+                published_date = published_el.text.strip()[:10]
+            except (ValueError, IndexError):
+                pass
 
         if not title:
             continue
@@ -79,7 +87,8 @@ def collect_arxiv(max_results: int = 50) -> list[dict]:
             "title": title,
             "content": summary,   # le résumé arXiv = notre "contenu"
             "url": link,
-            "date": published,
+            "date": view_date,
+            "published_date": published_date,
             "embedding": None,
             "cluster_id": -1,
         })

@@ -121,7 +121,7 @@ def _pipeline(today: str) -> dict:
         embeddings = get_embeddings_matrix(today_articles)
         today_articles, cohesion_threshold = cluster_articles(today_articles, embeddings)
         for a in today_articles:
-            db.update_article_cluster(a["id"], a["cluster_id"], a.get("cluster_fit"))
+            db.update_article_cluster(a["id"], a["date"], a["cluster_id"], a.get("cluster_fit"))
 
         clusters = build_clusters(today_articles, today, cohesion_threshold)
         db.save_clusters(clusters, today)

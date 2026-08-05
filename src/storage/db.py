@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, date
@@ -26,13 +27,53 @@ def get_conn():
         conn.close()
 
 
+def _articles_needs_pk_migration() -> bool:
+    """
+    Détecte l'ancien schéma `articles` (PK sur `id` seul). Avec cette PK, recollecter
+    un même article (arXiv/HF/Semantic Scholar forcent leur `date` à "aujourd'hui" à
+    chaque run) faisait qu'INSERT OR REPLACE déplaçait silencieusement sa ligne vers
+    la nouvelle date au lieu de le faire apparaître en plus sur les deux jours — il
+    disparaissait rétroactivement de la vue d'hier alors que le cluster d'hier,
+    déjà persisté dans `clusters`, référençait toujours son ancien comptage.
+    """
+    if not DB_PATH.exists():
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='articles'"
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None or row[0] is None:
+        return False
+    return "PRIMARY KEY (id, date)" not in row[0]
+
+
+def _backup_db_file_before_pk_migration():
+    if not DB_PATH.exists():
+        return
+    backup_path = DB_PATH.with_name(DB_PATH.stem + ".pre-pk-migration.bak")
+    shutil.copy2(DB_PATH, backup_path)
+    print(f"[db] Backed up {DB_PATH} to {backup_path} before articles PK migration.")
+
+
 def init_db():
+    needs_pk_migration = _articles_needs_pk_migration()
+    if needs_pk_migration:
+        _backup_db_file_before_pk_migration()
+
     with get_conn() as conn:
         # WAL (Write-Ahead Logging) : les lectures et écritures peuvent se faire
         # en parallèle sans se bloquer. Idéal pour un serveur web + cron simultanés.
         conn.executescript("""
             PRAGMA journal_mode=WAL;
         """)
+
+        if needs_pk_migration:
+            # On renomme l'ancienne table le temps de recréer la nouvelle avec la
+            # PK composite ; les données sont recopiées après la CREATE TABLE plus bas.
+            conn.execute("ALTER TABLE articles RENAME TO articles_old_pk_migration")
 
         # Migration live : si une colonne n'existe pas encore (base créée avant
         # qu'on l'ajoute), on l'ajoute sans perdre les données.
@@ -64,18 +105,21 @@ def init_db():
 
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS articles (
-                id TEXT PRIMARY KEY,          -- MD5 de source:url
+                id TEXT NOT NULL,             -- MD5 de source:url
                 source TEXT NOT NULL,         -- "arxiv", "techcrunch", "reddit_ml"...
                 title TEXT NOT NULL,
                 content TEXT,                 -- résumé ou corps de l'article
                 url TEXT,
-                date TEXT NOT NULL,           -- format YYYY-MM-DD
+                date TEXT NOT NULL,           -- format YYYY-MM-DD ; date d'affichage/regroupement
+                published_date TEXT,          -- format YYYY-MM-DD ; vraie date de publication si connue
+                                               -- (NULL pour les lignes migrées avant l'ajout de ce champ)
                 embedding TEXT,               -- vecteur JSON (liste de floats)
                 cluster_id INTEGER DEFAULT -1, -- -1 = non assigné (bruit HDBSCAN)
                 cluster_fit REAL DEFAULT NULL, -- similarité cosinus au centroïde du cluster
                 duplicate_of TEXT DEFAULT NULL, -- id de l'article survivant si doublon
                 paper_id TEXT DEFAULT NULL,    -- id arXiv normalisé (arxiv/HF/Semantic Scholar)
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id, date)         -- un même article peut réapparaître sur plusieurs jours
             );
 
             CREATE TABLE IF NOT EXISTS clusters (
@@ -112,17 +156,34 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_articles_cluster ON articles(cluster_id);
         """)
 
+        if needs_pk_migration:
+            old_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles_old_pk_migration)").fetchall()}
+            new_cols = [r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()]
+            # Ne copie que les colonnes qui existaient déjà dans l'ancien schéma ;
+            # les colonnes nouvelles (ex: published_date) restent NULL/défaut pour
+            # les lignes migrées, faute de savoir rétroactivement leur vraie valeur.
+            common = [c for c in new_cols if c in old_cols]
+            cols_sql = ", ".join(common)
+            conn.execute(
+                f"INSERT INTO articles ({cols_sql}) SELECT {cols_sql} FROM articles_old_pk_migration"
+            )
+            migrated = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+            conn.execute("DROP TABLE articles_old_pk_migration")
+            print(f"[db] Migrated {migrated} articles to composite PK (id, date).")
+
 
 def upsert_article(article: dict):
-    # INSERT OR REPLACE : si l'article existe déjà (même id), on le remplace.
-    # Utilisé pour mettre à jour l'embedding et le cluster_id après analyse.
+    # INSERT OR REPLACE sur la PK (id, date) : si le même article est recollecté un
+    # autre jour (arXiv/HF/Semantic Scholar forcent leur `date` à "aujourd'hui" à
+    # chaque run), il apparaît EN PLUS sur ce nouveau jour plutôt que de s'y déplacer
+    # en écrasant sa ligne d'hier — cf. _articles_needs_pk_migration ci-dessus.
     with get_conn() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO articles
-                (id, source, title, content, url, date, embedding, cluster_id,
+                (id, source, title, content, url, date, published_date, embedding, cluster_id,
                  cluster_fit, duplicate_of, paper_id)
             VALUES
-                (:id, :source, :title, :content, :url, :date,
+                (:id, :source, :title, :content, :url, :date, :published_date,
                  :embedding, :cluster_id, :cluster_fit, :duplicate_of, :paper_id)
         """, {
             "id": article["id"],
@@ -131,6 +192,10 @@ def upsert_article(article: dict):
             "content": article.get("content", ""),
             "url": article.get("url", ""),
             "date": article["date"],
+            # Vraie date de publication quand la source la fournit ; sinon égale à
+            # `date` (cas des sources qui n'ont jamais menti dessus : RSS, GitHub,
+            # blogs officiels). NULL seulement pour les lignes migrées avant ce champ.
+            "published_date": article.get("published_date", article["date"]),
             # L'embedding est stocké comme JSON string car SQLite n'a pas de type ARRAY
             "embedding": json.dumps(article["embedding"]) if article.get("embedding") else None,
             "cluster_id": article.get("cluster_id", -1),
@@ -175,12 +240,15 @@ def get_duplicate_sources_by_date(target_date: str) -> dict[str, list[str]]:
     return result
 
 
-def update_article_cluster(article_id: str, cluster_id: int, cluster_fit: float | None = None):
-    # Mise à jour ciblée après clustering — plus efficace qu'un upsert complet
+def update_article_cluster(article_id: str, target_date: str, cluster_id: int, cluster_fit: float | None = None):
+    # Mise à jour ciblée après clustering — plus efficace qu'un upsert complet.
+    # `target_date` est requis depuis le passage à la PK composite (id, date) : sans
+    # lui, un article recollecté sur plusieurs jours verrait TOUTES ses lignes
+    # (toutes dates confondues) écrasées par le cluster_id du run du jour.
     with get_conn() as conn:
         conn.execute(
-            "UPDATE articles SET cluster_id = ?, cluster_fit = ? WHERE id = ?",
-            (cluster_id, cluster_fit, article_id),
+            "UPDATE articles SET cluster_id = ?, cluster_fit = ? WHERE id = ? AND date = ?",
+            (cluster_id, cluster_fit, article_id, target_date),
         )
 
 

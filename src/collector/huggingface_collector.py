@@ -42,11 +42,14 @@ def collect_huggingface(max_results: int = 30) -> list[dict]:
         # ai_summary = résumé généré par HF, plus lisible que l'abstract brut
         content = (meta.get("ai_summary") or item.get("summary") or meta.get("summary") or "").strip()
 
-        # On utilise la date d'aujourd'hui : ces papers sont dans la section "Daily Papers"
-        # de HuggingFace, c'est-à-dire qu'ils ont été mis en avant aujourd'hui.
-        # Leur date arXiv (publishedAt) serait celle de la soumission initiale,
-        # ce qui les ferait disparaître de la vue "aujourd'hui".
-        pub_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # `date` (vue/regroupement) reste "aujourd'hui" : ces papers sont dans la
+        # section "Daily Papers" de HuggingFace, c'est-à-dire qu'ils ont été mis en
+        # avant aujourd'hui. Leur date arXiv réelle (publishedAt = soumission initiale)
+        # les ferait disparaître de la vue "aujourd'hui" si on l'utilisait pour `date` —
+        # elle est conservée séparément dans `published_date`.
+        view_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        real_published = (item.get("publishedAt") or meta.get("publishedAt") or "").strip()
+        published_date = real_published[:10] if len(real_published) >= 10 else view_date
 
         articles.append({
             "id": _make_id(paper_id),
@@ -54,7 +57,8 @@ def collect_huggingface(max_results: int = 30) -> list[dict]:
             "title": title,
             "content": content,
             "url": f"https://huggingface.co/papers/{paper_id}",
-            "date": pub_date,
+            "date": view_date,
+            "published_date": published_date,
             "embedding": None,
             "cluster_id": -1,
         })
