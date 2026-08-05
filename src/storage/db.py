@@ -51,6 +51,8 @@ def init_db():
             conn.execute("ALTER TABLE clusters ADD COLUMN low_confidence INTEGER DEFAULT 0")
         if cols and "labeling_method" not in cols:
             conn.execute("ALTER TABLE clusters ADD COLUMN labeling_method TEXT")
+        if cols and "centroid" not in cols:
+            conn.execute("ALTER TABLE clusters ADD COLUMN centroid TEXT")
 
         article_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
         if article_cols and "cluster_fit" not in article_cols:
@@ -91,6 +93,7 @@ def init_db():
                 sources TEXT DEFAULT '[]',    -- JSON : liste des sources distinctes
                 low_confidence INTEGER DEFAULT 0, -- 1 si cohesion < MIN_CLUSTER_FIT
                 labeling_method TEXT,         -- "llm" ou "heuristic-*" — traçabilité
+                centroid TEXT,                -- JSON : centroïde d'embedding du cluster (matching cross-jour)
                 PRIMARY KEY (id, date)        -- un cluster peut exister sur plusieurs jours
             );
 
@@ -191,8 +194,8 @@ def save_clusters(clusters: list[dict], target_date: str):
                 INSERT INTO clusters
                     (id, date, name, keywords, trend_score, article_count, yesterday_count,
                      summary, top_titles, cohesion, source_count, sources, low_confidence,
-                     labeling_method)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     labeling_method, centroid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 c["id"],
                 target_date,
@@ -208,6 +211,7 @@ def save_clusters(clusters: list[dict], target_date: str):
                 json.dumps(c.get("sources", [])),
                 int(c.get("low_confidence", False)),
                 c.get("labeling_method"),
+                json.dumps(c["centroid"]) if c.get("centroid") is not None else None,
             ))
 
 
@@ -225,6 +229,7 @@ def get_clusters_by_date(target_date: str) -> list[dict]:
         d["top_titles"] = json.loads(d["top_titles"])
         d["sources"] = json.loads(d["sources"]) if d.get("sources") else []
         d["low_confidence"] = bool(d.get("low_confidence", 0))
+        d["centroid"] = json.loads(d["centroid"]) if d.get("centroid") else None
         result.append(d)
     return result
 
