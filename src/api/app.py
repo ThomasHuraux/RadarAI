@@ -80,6 +80,8 @@ def _pipeline(today: str) -> dict:
         from src.collector.arxiv_collector import collect_arxiv
         from src.collector.semanticscholar_collector import collect_semanticscholar
         from src.collector.huggingface_collector import collect_huggingface
+        from src.collector.github_collector import collect_github_releases
+        from src.collector.official_blog_collector import collect_openai_blog, collect_anthropic_blog
         from src.processor.cleaner import clean_article, is_valid_article
         from src.processor.deduplicator import deduplicate
         from src.nlp.embedder import embed_articles, get_embeddings_matrix
@@ -87,7 +89,10 @@ def _pipeline(today: str) -> dict:
         from src.trends.detector import build_clusters
         from src.nlp.ollama_client import OllamaUnavailableError
 
-        articles = collect_rss() + collect_arxiv() + collect_semanticscholar() + collect_huggingface()
+        articles = (
+            collect_rss() + collect_arxiv() + collect_semanticscholar() + collect_huggingface()
+            + collect_github_releases() + collect_openai_blog() + collect_anthropic_blog()
+        )
         articles = [clean_article(a) for a in articles]
         articles = [a for a in articles if a["title"] and is_valid_article(a)]
         articles = deduplicate(articles)

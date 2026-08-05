@@ -43,7 +43,17 @@ def cmd_collect(target_date: str, verbose: bool = False):
     hf = collect_huggingface()
     print(f"[collect] HuggingFace: {len(hf)} articles")
 
-    all_articles = rss + arxiv + ss + hf
+    from src.collector.github_collector import collect_github_releases
+    print(f"[collect] Fetching GitHub releases...")
+    gh = collect_github_releases()
+    print(f"[collect] GitHub releases: {len(gh)} articles")
+
+    from src.collector.official_blog_collector import collect_openai_blog, collect_anthropic_blog
+    print(f"[collect] Fetching official blogs (OpenAI, Anthropic)...")
+    blogs = collect_openai_blog() + collect_anthropic_blog()
+    print(f"[collect] Official blogs: {len(blogs)} articles")
+
+    all_articles = rss + arxiv + ss + hf + gh + blogs
     print(f"[collect] Total before dedup: {len(all_articles)}")
 
     all_articles = [clean_article(a) for a in all_articles]
